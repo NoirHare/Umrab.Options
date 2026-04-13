@@ -1,179 +1,200 @@
 using System;
 using System.Collections.Generic;
 
-using Umrab.Options.Exceptions;
-using Umrab.Options.Tokenization;
-
-using OptionLooup = System.Collections.Generic.Dictionary<string, Umrab.Options.IOption>.AlternateLookup<System.ReadOnlySpan<char>>;
+using Umrab.Options.Parsing;
 
 namespace Umrab.Options;
 
-public class Command(string name = "") {
-    public string Name { get; } = name;
+public sealed class Command(string name = "", IReadOnlySet<char>? @short = null) {
+    public string Name { get; init; } = name;
+    public IReadOnlySet<char> Short { get; } = @short ?? new HashSet<char>();
 
-    private readonly Dictionary<string, Command> _commands = [];
-    private readonly Dictionary<char, Command> _aliasCommands = [];
-
-    private readonly Dictionary<string, IOption> _options = [];
-    private readonly Dictionary<char, IOption> _aliasOptions = [];
-
+    private readonly Dictionary<string, Command> _longCommands = new(StringComparer.Ordinal);
+    private readonly Dictionary<char, Command> _shortCommand = [];
+    private readonly Dictionary<string, IOption> _longOptions = new(StringComparer.Ordinal);
+    private readonly Dictionary<char, IOption> _shortOptions = [];
     private readonly List<IArgument> _arguments = [];
 
-    public Command SubCommand(string name, Action<Command> builder) {
-        Command command = new(name);
-        builder(command);
-        _commands.Add(name, command);
-        return this;
-    }
+    public Command(string name = "") : this(name, []) { }
+    public Command(string name = "", HashSet<char>? @short = null) : this(name, (IReadOnlySet<char>?)@short) { }
 
-    public Command SubCommand(string name, HashSet<char> aliases, Action<Command> builder) {
-        Command command = new(name);
-        builder(command);
-        _commands.Add(name, command);
-        foreach (char alias in aliases) {
-            _aliasCommands.Add(alias, command);
+    public Command Add<T>(Option<T> option) {
+        if (_longOptions.ContainsKey(option.Long)) {
+            throw new ArgumentException($"Option with long name '{option.Long}' already exists.", nameof(option));
+        }
+        foreach (char c in option.Short) {
+            if (_shortOptions.ContainsKey(c)) {
+                throw new ArgumentException($"Option with short name '{c}' already exists.", nameof(option));
+            }
+        }
+
+        _longOptions.Add(option.Long, option);
+        foreach (char c in option.Short) {
+            _shortOptions.Add(c, option);
         }
         return this;
     }
 
-    public Command Option<T>(string name, bool isFlag, Func<ReadOnlySpan<char>, T?, T> converter) {
-        Option<T> option = new(name, isFlag, converter);
-        _options.Add(name, option);
-        return this;
-    }
-
-    public Command Option<T>(string name, HashSet<char> aliases, bool isFlag, Func<ReadOnlySpan<char>, T?, T> converter) {
-        Option<T> option = new(name, isFlag, converter);
-        _options.Add(name, option);
-        foreach (char alias in aliases) {
-            _aliasOptions.Add(alias, option);
-        }
-        return this;
-    }
-    public Command Option<T>(string name, Func<ReadOnlySpan<char>, T?, T> converter) {
-        Option<T> option = new(name, false, converter);
-        _options.Add(name, option);
-        return this;
-    }
-
-    public Command Option<T>(string name, HashSet<char> aliases, Func<ReadOnlySpan<char>, T?, T> converter) {
-        Option<T> option = new(name, false, converter);
-        _options.Add(name, option);
-        foreach (char alias in aliases) {
-            _aliasOptions.Add(alias, option);
-        }
-        return this;
-    }
-
-    public Command Argument<T>(Func<ReadOnlySpan<char>, T> converter) {
-        Argument<T> argument = new(converter);
+    public Command Add<T>(Argument<T> argument) {
         _arguments.Add(argument);
         return this;
     }
-    public ParseResult Parse(ReadOnlySpan<string> args) => Parse(new Tokenizer(args));
 
-    private ParseResult Parse(Tokenizer tokenizer) {
-        OptionLooup options = _options.GetAlternateLookup<ReadOnlySpan<char>>();
-
-        ParseResult result = new(this);
-
-        Token wovToken = default;
-        IOption? wovOption = null;
-        int argumentIndex = 0;
-
-        while (tokenizer.TryNext(out Token token)) {
-            if (wovOption != null) {
-                if (tokenizer.EndOfOption || token.Type != TokenType.Argument) {
-                    throw new MissingValueException(wovOption, wovToken);
-                }
-
-                object? latest = result.TryGetValue(wovOption.Name, out object? value) ? value : wovOption.Default;
-                result.AddOrUpdateOption(wovOption.Name, wovOption.Convert(token.Origin, latest));
-
-                wovToken = default;
-                wovOption = null;
-
-                continue;
-            }
-
-            switch (token.Type) {
-                case TokenType.LongKey: {
-                    if (!options.TryGetValue(token.KeySpan, out IOption? option)) {
-                        throw new UnexpectedTokenException(token);
-                    }
-
-                    if (option.IsFlag) {
-                        object? latest = result.TryGetValue(option.Name, out object? value) ? value : option.Default;
-                        result.AddOrUpdateOption(option.Name, option.Convert(string.Empty, latest));
-
-                        continue;
-                    }
-
-                    wovToken = token;
-                    wovOption = option;
-
-                    continue;
-                }
-                case TokenType.ShortKey: {
-                    if (!_aliasOptions.TryGetValue(token.KeyChar, out IOption? option)) {
-                        throw new UnexpectedTokenException(token);
-                    }
-
-                    if (option.IsFlag) {
-                        object? latest = result.TryGetValue(option.Name, out object? value) ? value : option.Default;
-                        result.AddOrUpdateOption(option.Name, option.Convert(string.Empty, latest));
-
-                        continue;
-                    }
-
-                    wovToken = token;
-                    wovOption = option;
-
-                    continue;
-                }
-                case TokenType.LongOption: {
-                    if (!options.TryGetValue(token.KeySpan, out IOption? option) || option.IsFlag) {
-                        throw new UnexpectedTokenException(token);
-                    }
-
-                    object? latest = result.TryGetValue(option.Name, out object? value) ? value : option.Default;
-                    result.AddOrUpdateOption(option.Name, option.Convert(token.ValueSpan, latest));
-
-                    continue;
-                }
-                case TokenType.ShortOption: {
-                    if (!_aliasOptions.TryGetValue(token.KeyChar, out IOption? option) || option.IsFlag) {
-                        throw new UnexpectedTokenException(token);
-                    }
-
-                    object? latest = result.TryGetValue(option.Name, out object? value) ? value : option.Default;
-                    result.AddOrUpdateOption(option.Name, option.Convert(token.ValueSpan, latest));
-
-                    continue;
-                }
-                case TokenType.Argument: {
-                    if (!tokenizer.EndOfOption && result.SubCommand == null) {
-                        if (_commands.TryGetValue(token.Origin, out Command? command)) {
-                            result.SetSubCommand(command.Parse(tokenizer));
-                            return result;
-                        }
-
-                        if (token.Origin.Length == 1 && _aliasCommands.TryGetValue(token.Origin[0], out command)) {
-                            result.SetSubCommand(command.Parse(tokenizer));
-                            return result;
-                        }
-                    }
-
-                    if (argumentIndex >= _arguments.Count) throw new UnexpectedTokenException(token);
-
-                    result.AddArgument(_arguments[argumentIndex].Convert(token.Origin));
-                    argumentIndex++;
-
-                    continue;
-                }
+    public Command Add(Command command) {
+        if (_longCommands.ContainsKey(command.Name)) {
+            throw new ArgumentException($"Subcommand with name '{command.Name}' already exists.", nameof(command));
+        }
+        foreach (char c in command.Short) {
+            if (_shortCommand.ContainsKey(c)) {
+                throw new ArgumentException($"Subcommand with short name '{c}' already exists.", nameof(command));
             }
         }
 
-        return result;
+        _longCommands.Add(command.Name, command);
+        foreach (char c in command.Short) {
+            _shortCommand.Add(c, command);
+        }
+        return this;
+    }
+
+    public ParseResult Parse(string[] args, bool matchSelf = false) {
+        ArrayTokenizer tokenizer = new(args);
+        return Parse(ref tokenizer, matchSelf);
+    }
+
+    private ParseResult Parse(ref ArrayTokenizer tokenizer, bool matchSelf = false) {
+        Dictionary<IOption, object> options = new(_longOptions.Count);
+        Dictionary<IArgument, object> arguments = new(_arguments.Count);
+
+        IOption? option = null;
+
+        if (matchSelf) {
+            if (!tokenizer.Next(out Token token)) throw new InvalidOperationException($"Command '{Name}' is required.");
+
+            if (token.Type != TokenType.ArgumentOrValue
+             || !(token.Value.Equals(Name.AsSpan(), StringComparison.Ordinal)
+             || (token.Value.Length == 1 && Short.Contains(token.Value[0])))) {
+                throw new InvalidOperationException($"Expected command '{Name}' in '{token.Original}' at index {token.Index}.");
+            }
+        }
+
+        while (tokenizer.Next(out Token token)) {
+            Command? command = ProcessToken(token, tokenizer.EndOfOptions, options, arguments, ref option);
+            if (command != null) {
+                ValidateRequiredElements(options, arguments.Count);
+                return new ParseResult(this, command.Parse(ref tokenizer), options, arguments);
+            }
+        }
+
+        if (option != null) throw new InvalidOperationException($"Option '{option.Long}' expects a value.");
+
+        ValidateRequiredElements(options, arguments.Count);
+        return new ParseResult(this, null, options, arguments);
+    }
+
+    public ParseResult Parse(string command, bool matchSelf = false) {
+        StringTokenizer tokenizer = new(command);
+        return Parse(ref tokenizer, matchSelf);
+    }
+
+    private ParseResult Parse(ref StringTokenizer tokenizer, bool matchSelf = false) {
+        Dictionary<IOption, object> options = new(_longOptions.Count);
+        Dictionary<IArgument, object> arguments = new(_arguments.Count);
+
+        IOption? option = null;
+
+        if (matchSelf) {
+            if (!tokenizer.Next(out Token token)) throw new InvalidOperationException($"Command '{Name}' is required.");
+
+            if (token.Type != TokenType.ArgumentOrValue
+             || !(token.Value.Equals(Name.AsSpan(), StringComparison.Ordinal)
+             || (token.Value.Length == 1 && Short.Contains(token.Value[0])))) {
+                throw new InvalidOperationException($"Expected command '{Name}' in '{token.Original}' at index {token.Index}.");
+            }
+        }
+
+        while (tokenizer.Next(out Token token)) {
+            Command? command = ProcessToken(token, tokenizer.EndOfOptions, options, arguments, ref option);
+            if (command != null) {
+                ValidateRequiredElements(options, arguments.Count);
+                return new ParseResult(this, command.Parse(ref tokenizer), options, arguments);
+            }
+        }
+
+        if (option != null) throw new InvalidOperationException($"Option '{option.Long}' expects a value.");
+
+        ValidateRequiredElements(options, arguments.Count);
+        return new ParseResult(this, null, options, arguments);
+    }
+
+    private Command? ProcessToken(Token token, bool endOfOptions, Dictionary<IOption, object> options, Dictionary<IArgument, object> arguments, ref IOption? current) {
+        if (current is not null) {
+            if (token.Type == TokenType.ArgumentOrValue) {
+                object? prev = options.TryGetValue(current, out object? p) ? p : default;
+                options[current] = current.Convert(token.Value, prev);
+                current = null;
+                return null;
+            }
+
+            throw new InvalidOperationException($"Option '{current.Long}' expects a value.");
+        }
+
+        if (token.Type == TokenType.LongKey || token.Type == TokenType.ShortKey) {
+            IOption? o;
+            if (token.Type == TokenType.LongKey) {
+                _longOptions.GetAlternateLookup<ReadOnlySpan<char>>().TryGetValue(token.Value, out o);
+            } else {
+                _shortOptions.TryGetValue(token.Value[0], out o);
+            }
+
+            if (o == null) {
+                throw new InvalidOperationException($"Unknown option in '{token.Original}' at index {token.Index}.");
+            }
+
+            if (o.IsFlag) {
+                object? prev = options.TryGetValue(o, out object? p) ? p : default;
+                options[o] = o.Convert([], prev);
+            } else {
+                current = o;
+            }
+
+            return null;
+        }
+
+        if (token.Type == TokenType.ArgumentOrValue) {
+            if (!endOfOptions && _longCommands.GetAlternateLookup<ReadOnlySpan<char>>().TryGetValue(token.Value, out Command? command)) {
+                return command;
+            }
+
+            if (!endOfOptions && token.Value.Length == 1 && _shortCommand.TryGetValue(token.Value[0], out command)) {
+                return command;
+            }
+
+            if (arguments.Count < _arguments.Count) {
+                IArgument argument = _arguments[arguments.Count];
+                arguments[argument] = argument.Convert(token.Value);
+                return null;
+            }
+
+            throw new InvalidOperationException($"Unknown option in '{token.Original}' at index {token.Index}.");
+        }
+
+        return null;
+    }
+
+    private void ValidateRequiredElements(Dictionary<IOption, object> parsedOptions, int parsedArgumentCount) {
+        foreach (IOption option in _longOptions.Values) {
+            if (option.IsRequired && !parsedOptions.ContainsKey(option)) {
+                throw new InvalidOperationException($"Required option '{option.Long}' was not provided.");
+            }
+        }
+
+        if (parsedArgumentCount < _arguments.Count) {
+            for (int i = parsedArgumentCount; i < _arguments.Count; i++) {
+                if (_arguments[i].IsRequired) {
+                    throw new InvalidOperationException($"Required argument at index {i} was not provided.");
+                }
+            }
+        }
     }
 }

@@ -1,43 +1,37 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 
 namespace Umrab.Options;
 
-public class ParseResult {
+public sealed class ParseResult {
     public Command Command { get; }
+    public ParseResult? SubResult { get; }
 
-    public ParseResult? SubCommand { get; private set; }
+    private readonly IReadOnlyDictionary<IOption, object> _options;
+    private readonly IReadOnlyDictionary<IArgument, object> _arguments;
 
-    private readonly Dictionary<string, object> _options = [];
-
-    private readonly List<object> _arguments = [];
-
-    internal ParseResult(Command command) {
+    internal ParseResult(Command command, ParseResult? subResult, IReadOnlyDictionary<IOption, object> options, IReadOnlyDictionary<IArgument, object> arguments) {
         Command = command;
+        SubResult = subResult;
+        _options = options;
+        _arguments = arguments;
     }
 
-    internal void SetSubCommand(ParseResult result) {
-        SubCommand = result;
+    public T GetValue<T>(Option<T> option, Func<T> factory)
+        => _options.TryGetValue(option, out object? value) ? (T)value : factory();
+
+    public T GetValue<T>(Argument<T> argument, Func<T> factory)
+        => _arguments.TryGetValue(argument, out object? value) ? (T)value : factory();
+
+    public T GetRequiredValue<T>(Option<T> option) {
+        if (_options.TryGetValue(option, out object? value)) return (T)value;
+
+        throw new InvalidOperationException($"Required option '{option.Long}' was not found in the result.");
     }
 
-    internal bool TryGetValue(string name, [MaybeNullWhen(false)] out object? value) {
-        return _options.TryGetValue(name, out value);
-    }
+    public T GetRequiredValue<T>(Argument<T> argument) {
+        if (_arguments.TryGetValue(argument, out object? value)) return (T)value;
 
-    internal void AddOrUpdateOption(string name, object value) {
-        _options[name] = value;
-    }
-
-    internal void AddArgument(object value) {
-        _arguments.Add(value);
-    }
-
-    public T GetOption<T>(string name, Func<T> @default) {
-        return _options.TryGetValue(name, out object? value) ? (T)value : @default();
-    }
-
-    public T GetArgument<T>(int index, Func<T> @default) {
-        return index < _arguments.Count ? (T)_arguments[index] : @default();
+        throw new InvalidOperationException($"Required argument was not found in the result.");
     }
 }

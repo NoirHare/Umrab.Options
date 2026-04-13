@@ -1,21 +1,21 @@
 using System;
+using System.Collections.Generic;
 
 namespace Umrab.Options;
 
-internal interface IOption {
-    string Name { get; }
-    bool IsFlag { get; }
-    object? Default { get; }
+public sealed class Option<T>(string @long, IReadOnlySet<char> @short, bool isRequired, bool isFlag, Func<ReadOnlySpan<char>, T?, T> converter) : IOption {
 
-    object Convert(ReadOnlySpan<char> value, object? latest);
-}
+    public string Long { get; } = @long;
+    public IReadOnlySet<char> Short { get; } = @short;
 
-public class Option<T>(string name, bool isFlag, Func<ReadOnlySpan<char>, T?, T> converter) : IOption {
-    public string Name { get; } = name;
+    public bool IsRequired { get; } = isRequired;
     public bool IsFlag { get; } = isFlag;
-    object? IOption.Default => default(T);
 
     private readonly Func<ReadOnlySpan<char>, T?, T> _converter = converter;
 
-    public object Convert(ReadOnlySpan<char> value, object? latest) => _converter(value, (T?)latest)!;
+    public Option(string @long, bool isRequired, bool isFlag, Func<ReadOnlySpan<char>, T?, T> converter) : this(@long, [], isRequired, isFlag, converter) { }
+    public Option(string @long, HashSet<char> @short, bool isRequired, bool isFlag, Func<ReadOnlySpan<char>, T?, T> converter) : this(@long, (IReadOnlySet<char>)@short, isRequired, isFlag, converter) { }
+
+    public object Convert(ReadOnlySpan<char> value, object? previous)
+        => _converter(value, previous is T p ? p : default)!;
 }

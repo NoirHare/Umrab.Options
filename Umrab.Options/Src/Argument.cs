@@ -2,11 +2,9 @@ using System;
 
 namespace Umrab.Options;
 
-public interface IArgument {
-    object Convert(ReadOnlySpan<char> value);
-}
+public sealed class Argument<T>(bool isRequired, Func<ReadOnlySpan<char>, T> converter) : IArgument {
+    public bool IsRequired { get; init; } = isRequired;
 
-public class Argument<T>(Func<ReadOnlySpan<char>, T> converter) : IArgument {
     private readonly Func<ReadOnlySpan<char>, T> _converter = converter;
 
     public object Convert(ReadOnlySpan<char> value) => _converter(value)!;
