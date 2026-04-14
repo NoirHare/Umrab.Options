@@ -3,7 +3,7 @@
     <Nullable>enable</Nullable>
     <TargetFramework>net10.0</TargetFramework>
 
-    <PackageVersion>0.0.14-beta</PackageVersion>
+    <PackageVersion>0.0.15-beta</PackageVersion>
     <Authors>DarkRRb</Authors>
     <Description>A option parser</Description>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>

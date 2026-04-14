@@ -5,9 +5,9 @@ using Umrab.Options.Parsing;
 
 namespace Umrab.Options;
 
-public sealed class Command(string name = "", IReadOnlySet<char>? @short = null) {
+public sealed class Command(string name, IReadOnlySet<char> @short) {
     public string Name { get; init; } = name;
-    public IReadOnlySet<char> Short { get; } = @short ?? new HashSet<char>();
+    public IReadOnlySet<char> Short { get; } = @short;
 
     private readonly Dictionary<string, Command> _longCommands = new(StringComparer.Ordinal);
     private readonly Dictionary<char, Command> _shortCommand = [];
@@ -15,8 +15,9 @@ public sealed class Command(string name = "", IReadOnlySet<char>? @short = null)
     private readonly Dictionary<char, IOption> _shortOptions = [];
     private readonly List<IArgument> _arguments = [];
 
-    public Command(string name = "") : this(name, []) { }
-    public Command(string name = "", HashSet<char>? @short = null) : this(name, (IReadOnlySet<char>?)@short) { }
+    public Command() : this("", []) { }
+    public Command(string name) : this(name, []) { }
+    public Command(string name, HashSet<char> @short) : this(name, (IReadOnlySet<char>)@short) { }
 
     public Command Add<T>(Option<T> option) {
         if (_longOptions.ContainsKey(option.Long)) {
